@@ -1,5 +1,6 @@
 const express = require('express');
 const app = express();
+const keys = require('./config/keys');
 const twitter = require('ntwitter');
 const Sentiment = require('sentiment');
 const sentiment = new Sentiment();
@@ -16,56 +17,73 @@ app.get('/', (req, res) => {
 });
 
 var tweeter = new twitter({
-    consumer_key: 'wvUQK0MP33BxiqexLGny6u9tI',
-    consumer_secret: 'RMeHtbrIWRVS1AX9XWMDFb4kHn2Z8SimlsrxNwc4p4SDTb6geZ',
-    access_token_key: '895866685638402048-nFolZxqq6Mmph6P2A82PaUNt5CHyInB',
-    access_token_secret: 'xASy4CgmQ8uEei5oeXsfwz3uvIbBlscDUmQOLSZvAWXYt'
+    consumer_key: keys.consumer_key,
+    consumer_secret: keys.consumer_secret,
+    access_token_key: keys.access_token_key,
+    access_token_secret: keys.access_token_secret
 });
 
-async function beginMonitoring(phrase) {
-    const monitoringPhrase = phrase;
+app.post('/monitor', (req, res) => {
+    const phrase = req.body.phrase;
+    const seconds = req.body.seconds * 1;
+
     let tweetCount = 0;
     let pos = 0;
     let neg = 0;
     let nut = 0;
-    await tweeter.verifyCredentials(function (error, data) {
+
+    tweeter.verifyCredentials(function (error, data) {
         if (error) {
             return "Error connecting to Twitter: " + error;
         } else {
-            tweeter.stream('statuses/filter', {'track': monitoringPhrase}, async function (stream) {
-                console.log("Monitoring Twitter for " + monitoringPhrase);
-                await stream.on('data', function (data) {
+            tweeter.stream('statuses/filter', {
+                'track': phrase
+            }, function (stream) {
+                console.log("Monitoring Twitter for " + phrase);
+                stream.on('data', function (data) {
                     // only evaluate the sentiment of English-language tweets
                     if (data.lang === 'en') {
                         sentiment.analyze(data.text, function (err, result) {
                             tweetCount++;
                             const score = result.score;
                             console.log(score);
-                            if(score > 0) {
+                            if (score > 0) {
                                 pos++;
-                            } else if(score < 0) {
+                            } else if (score < 0) {
                                 neg++;
                             } else {
                                 nut++
                             }
                         });
                     }
-                    setTimeout(stream.destroy, 5000);
                 });
+                stream.on('end', function () {
+                    pos = Math.round((pos / tweetCount) * 100);
+                    neg = Math.round((neg / tweetCount) * 100);
+                    nut = Math.round((nut / tweetCount) * 100);
+                    console.log({
+                        tweetCount,
+                        pos,
+                        neg,
+                        nut
+                    })
+                    res.send({
+                        tweetCount,
+                        pos,
+                        neg,
+                        nut
+                    })
+                });
+                setTimeout(stream.destroy, seconds);
             });
         }
     });
-    return {
-        tweetCount,
-        pos,
-        neg,
-        nut
-    };
-}
+});
 
-app.get('/monitor', async (req, res) => {
+app.get('/monitor', (req, res) => {
     const phrase = req.query.phrase;
-    res.send(await beginMonitoring(phrase));
+    const seconds = req.query.seconds * 1000;
+    res.render('chart', { phrase, seconds });
 });
 
 const PORT = process.env.PORT || 3000;
